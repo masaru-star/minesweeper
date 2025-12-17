@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マインスイーパー 50x50</title>
+    <style>
+        #gameBoard {
+            display: grid;
+            margin: 20px auto;
+            border: 3px solid #666;
+            width: fit-content;
+            user-select: none;
+        }
+        .cell {
+            width: 20px;
+            height: 20px;
+            background-color: #ccc;
+            border: 1px solid #999;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.1s;
+        }
+        .revealed {
+            background-color: #eee;
+            border: 1px solid #bbb;
+            cursor: default;
+        }
+        .bomb {
+            background-color: #f00; /* 爆弾が当たった時の色 */
+            color: #fff;
+        }
+
+        /* フラグのスタイル */
+        .flag {
+            background-color: #f90;
+            color: #fff;
+            font-size: 16px;
+        }
+
+        /* 数字の色付け */
+        .n1 { color: blue; }
+        .n2 { color: green; }
+        .n3 { color: red; }
+        .n4 { color: navy; }
+        .n5 { color: brown; }
+        .n6 { color: cyan; }
+        .n7 { color: black; }
+        .n8 { color: gray; }
+
+        /* ヘッダー/ステータス */
+        #status {
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status">爆弾: <span id="bombCount"></span> | フラグ: <span id="flagCount">0</span> | <span id="message">プレイ中</span></div>
+    <div id="gameBoard"></div>
+    <button onclick="initGame()">リスタート</button>
+
+    <script>
+        // --- 設定変数 ---
+        const ROWS = 50; // 行数
+        const COLS = 50; // 列数
+        const BOMB_RATIO = 0.25; // 爆弾の割合 (0.15 = 15%)
+
+        // --- ゲームの状態 ---
+        let board = [];
+        let bombLocations = new Set();
+        let isGameOver = false;
+        let bombs = 0;
+        let flagsPlaced = 0;
+        let cellsToReveal;
+
+        const gameBoardEl = document.getElementById('gameBoard');
+        const bombCountEl = document.getElementById('bombCount');
+        const flagCountEl = document.getElementById('flagCount');
+        const messageEl = document.getElementById('message');
+
+        // グリッドテンプレートを設定
+        gameBoardEl.style.gridTemplateColumns = `repeat(${COLS}, 20px)`;
+
+        // --- 初期化 ---
+        function initGame() {
+            isGameOver = false;
+            board = [];
+            bombLocations = new Set();
+            gameBoardEl.innerHTML = ''; // ボードをクリア
+            flagsPlaced = 0;
+            bombs = 0;
+
+            // 1. ボードの初期化と爆弾の配置
+            setupBoard();
+
+            // 2. 隣接する爆弾の数の計算
+            calculateNumbers();
+            
+            // 3. UIの構築
+            renderBoard();
+
+            // 4. ステータスの更新
+            updateStatus();
+            messageEl.textContent = 'プレイ中';
+        }
+
+        function setupBoard() {
+            const totalCells = ROWS * COLS;
+            bombs = Math.floor(totalCells * BOMB_RATIO);
+            cellsToReveal = totalCells - bombs; // 開けるべき非爆弾セルの数
+
+            // ボードの作成
+            for (let r = 0; r < ROWS; r++) {
+                board[r] = [];
+                for (let c = 0; c < COLS; c++) {
+                    board[r][c] = {
+                        isBomb: false,
+                        isRevealed: false,
+                        isFlagged: false,
+                        neighborBombs: 0 // 隣接する爆弾の数
+                    };
+                }
+            }
+
+            // 爆弾のランダム配置
+            while (bombLocations.size < bombs) {
+                const r = Math.floor(Math.random() * ROWS);
+                const c = Math.floor(Math.random() * COLS);
+                const locationKey = `${r}-${c}`;
+
+                if (!bombLocations.has(locationKey)) {
+                    board[r][c].isBomb = true;
+                    bombLocations.add(locationKey);
+                }
+            }
+        }
+
+        function calculateNumbers() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    if (board[r][c].isBomb) continue;
+
+                    let count = 0;
+                    // 周囲8マスをチェック
+                    for (let dr = -1; dr <= 1; dr++) {
+                        for (let dc = -1; dc <= 1; dc++) {
+                            if (dr === 0 && dc === 0) continue; // 自分自身はスキップ
+                            
+                            const nr = r + dr; // Neighbor Row
+                            const nc = c + dc; // Neighbor Col
+
+                            // 範囲チェック
+                            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                                if (board[nr][nc].isBomb) {
+                                    count++;
+                                }
+                            }
+                        }
+                    }
+                    board[r][c].neighborBombs = count;
+                }
+            }
+        }
+
+        function renderBoard() {
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const cellEl = document.createElement('div');
+                    cellEl.classList.add('cell');
+                    cellEl.dataset.row = r;
+                    cellEl.dataset.col = c;
+                    cellEl.id = `cell-${r}-${c}`;
+
+                    // クリックイベント (左クリックで開く)
+                    cellEl.addEventListener('click', () => handleClick(r, c));
+
+                    // 右クリックイベント (フラグを立てる/解除)
+                    cellEl.addEventListener('contextmenu', (e) => {
+                        e.preventDefault(); // デフォルトのコンテキストメニューを抑制
+                        handleRightClick(r, c);
+                    });
+
+                    gameBoardEl.appendChild(cellEl);
+                }
+            }
+        }
+
+        function updateCellUI(r, c) {
+            const cell = board[r][c];
+            const cellEl = document.getElementById(`cell-${r}-${c}`);
+
+            if (cell.isRevealed) {
+                cellEl.classList.add('revealed');
+                cellEl.classList.remove('flag'); // フラグを解除
+
+                if (cell.isBomb) {
+                    cellEl.classList.add('bomb');
+                    cellEl.textContent = '💣';
+                } else if (cell.neighborBombs > 0) {
+                    cellEl.textContent = cell.neighborBombs;
+                    cellEl.classList.add(`n${cell.neighborBombs}`);
+                } else {
+                    cellEl.textContent = ''; // 隣接爆弾が0の場合は空欄
+                }
+            } else if (cell.isFlagged) {
+                cellEl.classList.add('flag');
+                cellEl.textContent = '🚩';
+            } else {
+                cellEl.classList.remove('revealed', 'bomb', 'flag', 'n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'n8');
+                cellEl.textContent = '';
+            }
+        }
+
+        function updateStatus() {
+            bombCountEl.textContent = bombs;
+            flagCountEl.textContent = flagsPlaced;
+        }
+
+        // --- ゲームロジック ---
+
+        function handleClick(r, c) {
+            if (isGameOver || board[r][c].isRevealed || board[r][c].isFlagged) {
+                return;
+            }
+
+            const cell = board[r][c];
+            cell.isRevealed = true;
+            cellsToReveal--;
+            if (cell.isBomb) {
+                cell.isRevealed = true;
+                gameOver(false);
+            } else if (cell.neighborBombs === 0) {
+                revealEmptyCells(r, c);
+            }
+            updateCellUI(r, c);
+            checkWin();
+        }
+        function handleRightClick(r, c) {
+            if (isGameOver || board[r][c].isRevealed) {
+                return;
+            }
+
+            const cell = board[r][c];
+            
+            if (cell.isFlagged) {
+                cell.isFlagged = false;
+                flagsPlaced--;
+            } else if (flagsPlaced < bombs) { // 爆弾数以下のフラグのみ許可
+                cell.isFlagged = true;
+                flagsPlaced++;
+            }
+
+            updateCellUI(r, c);
+            updateStatus();
+            checkWin();
+        }
+
+        // ゼロのマスを開いたときの連鎖処理
+        function revealEmptyCells(r, c) {
+            // 周囲8マスをチェック
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    const nr = r + dr;
+                    const nc = c + dc;
+
+                    // 範囲チェックと、未公開・未フラグのチェック
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) {
+                        const neighbor = board[nr][nc];
+                        if (!neighbor.isRevealed && !neighbor.isFlagged) {
+                            neighbor.isRevealed = true;
+                            cellsToReveal--;
+                            updateCellUI(nr, nc);
+
+                            // 隣のマスもゼロなら再帰的に開く
+                            if (neighbor.neighborBombs === 0) {
+                                revealEmptyCells(nr, nc);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function checkWin() {
+            // 勝利条件: 全ての非爆弾セルが公開されている
+            if (cellsToReveal === 0) {
+                gameOver(true);
+            }
+        }
+
+        function gameOver(isWin) {
+            isGameOver = true;
+            
+            if (isWin) {
+                messageEl.textContent = '🎉 勝利しました！おめでとうございます！ 🎉';
+            } else {
+                messageEl.textContent = '💥 ゲームオーバー！爆弾を踏みました。 💥';
+                // 全ての爆弾を表示
+                for (let r = 0; r < ROWS; r++) {
+                    for (let c = 0; c < COLS; c++) {
+                        const cell = board[r][c];
+                        if (cell.isBomb && !cell.isFlagged) { // 爆弾だがフラグが立っていないセル
+                            cell.isRevealed = true;
+                            updateCellUI(r, c);
+                        } else if (cell.isFlagged && !cell.isBomb) { // 間違ったフラグ
+                            const cellEl = document.getElementById(`cell-${r}-${c}`);
+                            cellEl.textContent = '❌'; 
+                            cellEl.style.backgroundColor = 'pink';
+                        }
+                    }
+                }
+            }
+        }
+
+        // 最初にゲームを初期化
+        initGame();
+    </script>
+
+</body>
+</html>
